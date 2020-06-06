@@ -10,8 +10,7 @@ import org.apache.hadoop.mapred.*;
 import org.apache.hadoop.util.*;
 
 public class fileccount {
-  protected static final int REDUCER_TASKS=3;
-
+protected static final int REDUCER_TASKS=3;
   public class MaxCountTuple implements Writable {
   	private int max = 0;
   	private long count = 0;

@@ -1,194 +1,229 @@
 package org.myorg;
 
-import java.io.IOException;
-import java.util.*;
 import java.io.*;
+import java.util.*;
+import java.util.StringTokenizer;
 
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.conf.*;
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.*;
-import org.apache.hadoop.mapred.*;
 import org.apache.hadoop.mapreduce.*;
+import org.apache.hadoop.mapreduce.lib.input.*;
+import org.apache.hadoop.mapreduce.lib.output.*;
 import org.apache.hadoop.util.*;
 
 public class fileccount {
-  protected static final int REDUCER_TASKS=3;
+  protected static final int REDUCER_TASKS=7;
 
-  public class MaxCountTuple implements Writable {
-  	private int max = 0;
-  	private long count = 0;
-  	private String filename = "";
-  	
-  	public int getMax() {
-  		return max;
+  public static class MaxCountTuple implements WritableComparable<MaxCountTuple> {
+  	private IntWritable count;
+  	private Text filename;
+  	private Text chara;
+  	private IntWritable times;
+   	
+  	public MaxCountTuple() {
+  		this.count = new IntWritable();
+  		this.times = new IntWritable();
+  		this.filename = new Text();
+  		this.chara = new Text();
   	}
   	
-  	public long getCount() {
+  	public MaxCountTuple(Text filename, IntWritable count, Text chara, IntWritable times) {
+  		this.count = count;
+  		this.times = times;
+  		this.filename = filename;
+  		this.chara = chara;
+  	}
+  	
+  	public void set(Text filename, IntWritable count, Text chara, IntWritable times) {
+  		this.count = count;
+  		this.times = times;
+  		this.filename = filename;
+  		this.chara = chara;
+  	}
+  	
+  	public IntWritable getCount() {
   		return count;
   	}
   	
-  	public String getFilename() {
+  	public Text getFilename() {
   		return filename;
   	}
   	
-  	public void setMax(int max) {
-  		this.max = max;
+  	public Text getChara() {
+  		return chara;
   	}
   	
-  	public void setCount(int count) {
+  	public IntWritable getTimes() {
+  		return times;
+  	}
+  	
+  	public void setCount(IntWritable count) {
   		this.count = count;
   	}
   	
-  	public void setFilename(String filename) {
+  	public void setFilename(Text filename) {
   		this.filename = filename;
   	}
   	
-  	public void readFields(DataInput in) throws IOException {
-  		max = in.readInt();
-  		count = in.readLong();
-  		filename = in.readString();
+  	public void setChara(Text chara) {
+  		this.chara = chara;
   	}
   	
+  	public void setTimes(IntWritable times) {
+  		this.times = times;
+  	}
+  	
+  	@Override
+  	public void readFields(DataInput in) throws IOException {
+  		count.readFields(in);
+  		times.readFields(in);
+  		filename.readFields(in);
+  		chara.readFields(in);
+  	}
+  	
+  	@Override
   	public void write(DataOutput out) throws IOException {
-  		out.writeInt(max);
-  		out.writeLong(count);
-  		out.writeString(filename);
+  		count.write(out);
+  		times.write(out);
+  		filename.write(out);
+  		chara.write(out);
   	}
   	
   	public String toString() {
-  		return max + "\t" + filename + "\t" + count;
+  		return filename + "/" + times + "\t" + count;
   	}
-  }
-
-  public static class Map extends MapReduceBase implements Mapper<LongWritable, Text, Text, IntWritable> {
-    private final static IntWritable one = new IntWritable(1);
-    private Text c = new Text();
-
-    public void map(LongWritable key, Text value, OutputCollector<Text, IntWritable> output, Reporter reporter) throws IOException {
-      String filename = ((FileSplit) reporter.getInputSplit()).getPath().getName();
-      String line = value.toString();
-
-      String words[] = line.split("");
-      String firsts = "";
-      int i=0;
-      for (String s : words) {
-	firsts += s.charAt(0) + " ";
-      }
-      StringTokenizer tokenizer = new StringTokenizer(firsts);
-      
-      while (tokenizer.hasMoreTokens()) {
-        c.set(tokenizer.nextToken()+","+filename);
-        output.collect(c, one);
-      }
+  	
+  	@Override
+  	public int compareTo(MaxCountTuple o) {
+  		if (count.compareTo(o.getCount()) > 0) {
+  			return 1;
+  		} else {
+  			return 0;
+  		}
+  	}
+  	
+  	@Override
+  	public boolean equals(Object o) {
+  		if(o instanceof MaxCountTuple) {
+  			MaxCountTuple other = (MaxCountTuple) o;
+  			return filename.equals(other.filename) && chara.equals(other.chara);
+  		}
+  		return false;
+  	}
+  	
+  	@Override
+  	public int hashCode() {
+  		return chara.hashCode();
+  	}
     }
-  }
 
-  public static class Map1 extends Mapper implements Mapper<Object, Text, Text, MaxCountTuple> {
+
+  public static class Map extends Mapper<Object, Text, Text, MaxCountTuple> {
+    private final static MaxCountTuple outTuple = new MaxCountTuple();
+    
+    private IntWritable oneCount = new IntWritable();
     private Text letter = new Text();
-    private MaxCountTuple outTuple = new MaxCountTuple();
+    private Text filename = new Text();
 
-    public void map(Object key, Text value, Context context) throws IOException {
+    public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
       String line = value.toString();
-      StringTokenizer tokenizer = new StringTokenizer(line, "\n", false);
+      StringTokenizer tokenizer = new StringTokenizer(line);
+      String fileName = ((FileSplit) context.getInputSplit()).getPath().getName();
       
+      HashMap<String, Integer> hp = new HashMap<String, Integer>();
+      
+      for(char ch='a'; ch <='z'; ch++) {
+      	hp.put(String.valueOf(ch), 0);
+      }
+      
+      for(char ch='A'; ch <='Z'; ch++) {
+      	hp.put(String.valueOf(ch), 0);
+      }
       
       while (tokenizer.hasMoreTokens()) {
-      	StringTokenizer tokenizer_tmp = new StringTokenizer(tokenizer.nextToken(), ",", false);
-      	
-        String letter_tmp = tokenizer_tmp.nextToken();
+      	String token = String.valueOf(tokenizer.nextToken().charAt(0));
+      	if (hp.get(token) != null) {
+      		int c = hp.get(token);
+      		hp.remove(token);
+      		hp.put(token, c+1);
+      	} else {
+      		hp.put(token, 1);
+      	}
+      }
+      
+      for(java.util.Map.Entry<String, Integer> m : hp.entrySet()) {
+        if (m.getValue().compareTo(0) == 0) filename.set(new Text("-"));
+        else filename.set(new Text(fileName));
         
-        StringTokenizer tokenizer_tmp1 = new StringTokenizer(tokenizer_tmp.nextToken(), "\t", false);
-        outTuple.setFilename(tokenizer_tmp1.nextToken());
+        letter.set(m.getKey());
+        oneCount.set(m.getValue());
         
-        Integer count = Integer.parseInt(tokenizer_tmp1.nextToken());
-        outTuple.setMax(count);
-        outTuple.setCount(count);
+        outTuple.set(filename, oneCount, letter, oneCount);
         
-        letter.set(letter_tmp);
         context.write(letter, outTuple);
       }
     }
   }
+  
 
-  public static class Reduce extends MapReduceBase implements Reducer<Text, IntWritable, Text, IntWritable> {
-    public void reduce(Text key, Iterator<IntWritable> values, OutputCollector<Text, IntWritable> output, Reporter reporter) throws IOException {
-	int sum = 0;
-      	while (values.hasNext()) {
-        	sum += values.next().get();
-      	}
-        
-      	output.collect(key, new IntWritable(sum));
-   }
-  }
 
-  public static class Reduce1 extends Reducer implements Reducer<Text, MaxCountTuple, Text, MaxCountTuple> {
+  public static class Reduce extends Reducer<Text, MaxCountTuple, Text, MaxCountTuple> {
     // Our output value Writable
-    private MaxCountTuple result = new MaxCountResult();
-    public void reduce(Text key, Iterator<MaxCountTuple> values, Context context) throws IOException {
+    private final static MaxCountTuple result = new MaxCountTuple();
+    
+    public void reduce(Text key, Iterable<MaxCountTuple> values, Context context) throws IOException, InterruptedException {
 	//Initialize our result
-	result.setMax(null);
-	result.setCount(null);
-	result.setFilename(null);
+	result.setCount(new IntWritable());
+	result.setFilename(new Text());
+	result.setTimes(new IntWritable());
 	
 	int sum = 0;
-	
+	int timesMax = 0;
+	int resultMax = 0;
+	String maxFilename = "-";
 	// Iterator through all input values for this key
-	while (values.hasNext()) {
+	for (MaxCountTuple val : values) {
 		// If the result's max is less that the value's max
 		// Set the result's max to value's
-		MaxCountTule val = values.nextToken();
-		if (result.getMax() == null || val.getMax().compareTo(result.getMax()) > 0) {
-			result.setMax(val.getMax());
+		if ((resultMax == 0) || (val.getCount().get() > resultMax)) {
+			resultMax = val.getCount().get();
+			maxFilename = val.getFilename().toString();
+			timesMax = val.getCount().get();
 		}
-		sum += val.getCount();
+		sum = sum + val.getCount().get();
 	}
 	
 	// Set out count to the number of input values
-	result.setCount(sum);
+	result.getCount().set(sum);
+	result.getFilename().set(maxFilename);
+	result.getTimes().set(timesMax);
 	context.write(key, result);
    }
   }
 
   public static void main(String[] args) throws Exception {
-    JobConf conf = new JobConf(fileccount.class);
-    conf.setJobName("fileccount");
+    Configuration conf = new Configuration();
+    Job job = Job.getInstance(conf);
+    job.setJarByClass(fileccount.class);
+    job.setJobName("fileccount");
 
-    conf.setOutputKeyClass(Text.class);
-    conf.setOutputValueClass(IntWritable.class);
+    job.setOutputKeyClass(Text.class);
+    job.setOutputValueClass(MaxCountTuple.class);
 
-    conf.setMapperClass(Map.class);
-    conf.setCombinerClass(Reduce.class);
-    conf.setReducerClass(Reduce.class);
+    job.setMapperClass(Map.class);
+    job.setCombinerClass(Reduce.class);
+    job.setReducerClass(Reduce.class);
+    
+    //job.setMapOutputKeyClass(Text.class);
+    //job.setMapOutputValueClass(MaxCountTuple.class);
 
-    conf.setInputFormat(TextInputFormat.class);
-    conf.setOutputFormat(TextOutputFormat.class);
+    job.setNumReduceTasks(REDUCER_TASKS);
 
-    conf.setNumReduceTasks(REDUCER_TASKS);
+    FileInputFormat.setInputPaths(job, new Path(args[0]));
+    FileOutputFormat.setOutputPath(job, new Path(args[1]));
 
-    FileInputFormat.setInputPaths(conf, new Path(args[0]));
-    FileOutputFormat.setOutputPath(conf, new Path(args[1]));
-
-    JobClient.runJob(conf);
-
-    /* Start the 2nd MR */
-    Job conf1 = new Job();
-    conf1.setJarByClass(fileccount.class);
-    conf.setJobName("fileccountfinal");
-
-    conf1.setMapperClass(Map1.class);
-    conf1.setCombinerClass(Reduce1.class);
-    conf1.setReducerClass(Reduce1.class);
-
-    conf1.setOutputKeyClass(Text.class);
-    conf1.setOutputValueClass(IntWritable.class);
-    conf1.setOutputFormatClass(TextOutputFormat.class);
-
-    conf.setNumReduceTasks(REDUCER_TASKS);
-
-    FileInputFormat.setInputPaths(conf1, new Path(args[1]));
-    FileOutputFormat.setOutputPath(conf1, new Path(args[2]));
-
-    conf1.waitForCompletion(true);
+    job.waitForCompletion(true);
   }
 }
 
